@@ -45,6 +45,23 @@ type Server struct {
 	tlsConfig         *tls.Config
 	cacheShaPassword  *sync.Map // 'user@host' -> SHA256(SHA256(PASSWORD))
 	authProvider      AuthenticationProvider
+
+	maxHandshakePacketSize int // see SetMaxHandshakePacketSize
+}
+
+// SetMaxHandshakePacketSize bounds the size of the packets a client may send in the connection phase: its handshake
+// response, the answer to an authentication switch, and the data of an authentication exchange. A packet announcing more
+// than n bytes is refused, and the connection with it, before any of its payload is read or allocated. Zero, the default,
+// means no limit.
+//
+// Without a limit a client that has not authenticated yet can make the server allocate up to 16 MB for each connection, with a
+// four-byte header. A real handshake is well under a kilobyte, plus the password and the connection attributes.
+//
+// The limit ends with the connection phase. To bound the commands that follow, use [Conn.SetMaxPacketSize].
+//
+// Call it before the server accepts connections: it is not safe to change while connections are being set up.
+func (s *Server) SetMaxHandshakePacketSize(n int) {
+	s.maxHandshakePacketSize = n
 }
 
 // NewDefaultServer: New mysql server with default settings.

@@ -56,6 +56,9 @@ type Conn struct {
 	compressedHeader [7]byte
 
 	compressedReader io.Reader
+
+	// maxPacketSize bounds the packets read from the peer, see SetMaxPacketSize. Zero means no limit.
+	maxPacketSize int
 }
 
 func NewConn(conn net.Conn) *Conn {
@@ -317,7 +320,21 @@ func (c *Conn) copyN(dst io.Writer, n int64) (int64, error) {
 	return written, nil
 }
 
+// SetMaxPacketSize bounds the size of the packets read from the peer. A packet announcing more than n bytes of payload (the
+// fragments of a packet of 16 MB or more count together) is refused, with an error wrapping mysql.ErrBadConn, as soon as its
+// header is read: none of its payload is read or allocated. Zero or less means no limit, which is the default.
+//
+// Without a limit the peer decides how much is allocated, up to 16 MB for each packet header it sends.
+func (c *Conn) SetMaxPacketSize(n int) {
+	c.maxPacketSize = n
+}
+
 func (c *Conn) ReadPacketTo(w io.Writer) error {
+	return c.readPacketTo(w, 0)
+}
+
+// readPacketTo reads one fragment, and the ones that follow it, of a packet of which alreadyRead bytes have been read.
+func (c *Conn) readPacketTo(w io.Writer, alreadyRead int) error {
 	// The peer may be waiting on our buffered output before it sends more.
 	if err := c.Flush(); err != nil {
 		return err
@@ -350,6 +367,10 @@ func (c *Conn) ReadPacketTo(w io.Writer) error {
 
 	c.Sequence++
 
+	if c.maxPacketSize > 0 && alreadyRead+length > c.maxPacketSize {
+		return errors.Wrapf(mysql.ErrBadConn, "packet of %d bytes exceeds the limit of %d bytes", alreadyRead+length, c.maxPacketSize)
+	}
+
 	if buf, ok := w.(*bytes.Buffer); ok {
 		// Allocate the buffer with expected length directly instead of call `grow` and migrate data many times.
 		buf.Grow(length)
@@ -364,7 +385,7 @@ func (c *Conn) ReadPacketTo(w io.Writer) error {
 		return nil
 	}
 
-	if err := c.ReadPacketTo(w); err != nil {
+	if err := c.readPacketTo(w, alreadyRead+length); err != nil {
 		return errors.Wrap(err, "ReadPacketTo failed")
 	}
 

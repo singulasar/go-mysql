@@ -75,6 +75,7 @@ func (s *Server) NewCustomizedConn(conn net.Conn, authHandler AuthenticationHand
 	} else {
 		packetConn = packet.NewConn(conn)
 	}
+	packetConn.SetMaxPacketSize(s.maxHandshakePacketSize)
 
 	c := &Conn{
 		Conn:         packetConn,
@@ -91,6 +92,9 @@ func (s *Server) NewCustomizedConn(conn net.Conn, authHandler AuthenticationHand
 		c.Close()
 		return nil, err
 	}
+
+	// The limit is for the connection phase only.
+	c.SetMaxPacketSize(0)
 
 	// The handshake settled the final transport (the client may have upgraded
 	// to TLS), so reads can be buffered from here on.
